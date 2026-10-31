@@ -1,0 +1,27 @@
+name: Urun scraper
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Marka basina urun limiti (bos = hepsi)"
+        required: false
+        default: "20"
+  schedule:
+    - cron: "0 3 * * 1"   # her pazartesi 03:00 UTC
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Scraper
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          LIMIT: ${{ github.event.inputs.limit }}
+        run: |
+          if [ -n "$LIMIT" ]; then python scraper.py --limit "$LIMIT"; else python scraper.py; fi

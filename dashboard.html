@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ürün Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--text:#1a1d23;--muted:#6b7280;--line:#e5e7eb;--accent:#1f3a5f;
+--c1:#1f3a5f;--c2:#b4893a;--c3:#2e7d6b;--c4:#a23b4f}
+@media (prefers-color-scheme:dark){:root{--bg:#12151a;--card:#1b1f27;--text:#e8eaee;--muted:#98a1b0;--line:#2b313c;--accent:#7fa6d9}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{padding:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+h1{font-size:18px;margin:0}
+.wrap{padding:0 16px 32px;max-width:1280px;margin:0 auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px}
+.kpi .v{font-size:22px;font-weight:650}.kpi .l{color:var(--muted);font-size:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-bottom:12px}
+.card h2{font-size:13px;margin:0 0 8px;color:var(--muted);font-weight:600}
+canvas{max-height:260px}
+.controls{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+input,select,button{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--text)}
+button{cursor:pointer}
+input[type=search]{flex:1;min-width:160px}
+.tablewrap{overflow:auto;max-height:560px}
+table{border-collapse:collapse;width:100%;min-width:760px}
+th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+th{position:sticky;top:0;background:var(--card);cursor:pointer;font-size:12px;color:var(--muted)}
+td.name{white-space:normal;min-width:240px}
+td img{width:36px;height:48px;object-fit:cover;border-radius:4px;vertical-align:middle;margin-right:8px;background:var(--line)}
+td a{color:var(--accent);text-decoration:none}
+.badge{padding:2px 7px;border-radius:99px;font-size:11px;background:var(--line)}
+.old{color:var(--muted);text-decoration:line-through;margin-left:6px;font-size:12px}
+.drop{border:2px dashed var(--line);border-radius:12px;padding:40px;text-align:center;color:var(--muted);margin:24px 0}
+.pager{display:flex;gap:8px;align-items:center;justify-content:flex-end;margin-top:10px;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1>DS Damat · Süvari · Altınyıldız · Kiğılı — Ürün Dashboard</h1>
+  <div><input type="file" id="file" accept=".json" hidden>
+  <button onclick="file.click()">products.json yükle</button></div>
+</header>
+<div class="wrap">
+  <div id="empty" class="drop">
+    <p>Supabase'de henüz ürün yok veya bağlanılamadı.</p>
+    <p>Scraper'ı çalıştırıp veriyi yükledikten sonra sayfayı yenileyin.<br>İsterseniz products.json dosyasını buraya sürükleyebilirsiniz.</p>
+  </div>
+  <div id="app" hidden>
+    <div class="kpis" id="kpis"></div>
+    <div class="grid">
+      <div class="card"><h2>Marka başına ürün sayısı</h2><canvas id="cBrandCount"></canvas></div>
+      <div class="card"><h2>Marka başına ortalama fiyat (TL)</h2><canvas id="cBrandAvg"></canvas></div>
+      <div class="card"><h2>Fiyat dağılımı</h2><canvas id="cHist"></canvas></div>
+      <div class="card"><h2>En kalabalık kategoriler</h2><canvas id="cCat"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="controls">
+        <input type="search" id="q" placeholder="Ürün adı, kod veya kategori ara…">
+        <select id="fBrand"><option value="">Tüm markalar</option></select>
+        <select id="fCat"><option value="">Tüm kategoriler</option></select>
+        <select id="fStock"><option value="">Stok: hepsi</option><option value="1">Stokta</option><option value="0">Tükendi</option></select>
+        <select id="fDisc"><option value="">İndirim: hepsi</option><option value="1">Sadece indirimli</option></select>
+        <button id="csv">CSV indir</button>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr>
+          <th data-k="name">Ürün</th><th data-k="brand">Marka</th><th data-k="category">Kategori</th>
+          <th data-k="price">Fiyat</th><th data-k="disc">İndirim</th><th data-k="in_stock">Stok</th>
+        </tr></thead><tbody id="rows"></tbody></table></div>
+      <div class="pager"><span id="count"></span><button id="prev">‹</button><span id="pg"></span><button id="next">›</button></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmt = n => n == null ? '—' : n.toLocaleString('tr-TR', {maximumFractionDigits: 0}) + ' TL';
+const COLORS = ['#1f3a5f', '#b4893a', '#2e7d6b', '#a23b4f', '#6a5acd', '#888'];
+const PAGE = 50;
+let DATA = [], VIEW = [], charts = {}, sortK = 'name', sortDir = 1, page = 0;
+
+function load(rows) {
+  DATA = rows.map(r => ({
+    ...r,
+    price: r.price == null ? null : Number(r.price),
+    original_price: r.original_price == null ? null : Number(r.original_price),
+    disc: (r.original_price && r.price && r.original_price > r.price)
+      ? Math.round((1 - r.price / r.original_price) * 100) : 0,
+    category: r.category || 'Diğer'
+  }));
+  $('empty').hidden = true; $('app').hidden = false;
+  fill($('fBrand'), [...new Set(DATA.map(d => d.brand))].sort(), 'Tüm markalar');
+  fill($('fCat'), [...new Set(DATA.map(d => d.category))].sort(), 'Tüm kategoriler');
+  page = 0; apply();
+}
+function fill(sel, vals, first) {
+  sel.innerHTML = `<option value="">${first}</option>` + vals.map(v => `<option>${esc(v)}</option>`).join('');
+}
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c])); }
+
+function apply() {
+  const q = $('q').value.trim().toLocaleLowerCase('tr'), b = $('fBrand').value, c = $('fCat').value,
+        s = $('fStock').value, d = $('fDisc').value;
+  VIEW = DATA.filter(x =>
+    (!b || x.brand === b) && (!c || x.category === c) &&
+    (!s || (s === '1') === !!x.in_stock) && (!d || x.disc > 0) &&
+    (!q || `${x.name} ${x.sku || ''} ${x.category}`.toLocaleLowerCase('tr').includes(q)));
+  VIEW.sort((a, b2) => {
+    const A = a[sortK], B = b2[sortK];
+    if (A == null) return 1; if (B == null) return -1;
+    return (typeof A === 'number' ? A - B : String(A).localeCompare(String(B), 'tr')) * sortDir;
+  });
+  kpis(); charts_(); table();
+}
+
+function kpis() {
+  const p = VIEW.map(x => x.price).filter(v => v != null).sort((a, b) => a - b);
+  const avg = p.length ? p.reduce((a, b) => a + b, 0) / p.length : null;
+  const med = p.length ? p[Math.floor(p.length / 2)] : null;
+  const disc = VIEW.filter(x => x.disc > 0).length;
+  const stock = VIEW.filter(x => x.in_stock === true).length;
+  const items = [
+    ['Toplam ürün', VIEW.length.toLocaleString('tr-TR')],
+    ['Ortalama fiyat', fmt(avg)], ['Medyan fiyat', fmt(med)],
+    ['İndirimli ürün', `${disc.toLocaleString('tr-TR')} (%${VIEW.length ? Math.round(disc / VIEW.length * 100) : 0})`],
+    ['Stokta', stock.toLocaleString('tr-TR')]
+  ];
+  $('kpis').innerHTML = items.map(([l, v]) => `<div class="card kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('');
+}
+
+function group(keyFn) { const m = new Map(); VIEW.forEach(x => { const k = keyFn(x); (m.get(k) || m.set(k, []).get(k)).push(x); }); return m; }
+function draw(id, cfg) { charts[id]?.destroy(); charts[id] = new Chart($(id), cfg); }
+function charts_() {
+  const text = getComputedStyle(document.body).color;
+  Chart.defaults.color = text; Chart.defaults.borderColor = 'rgba(128,128,128,.2)';
+  const byBrand = [...group(x => x.brand)].sort((a, b) => b[1].length - a[1].length);
+  const labels = byBrand.map(e => e[0]);
+  const bar = (data, extra = {}) => ({type: 'bar', data: {labels, datasets: [{data, backgroundColor: COLORS}]},
+    options: {plugins: {legend: {display: false}}, ...extra}});
+  draw('cBrandCount', bar(byBrand.map(e => e[1].length)));
+  draw('cBrandAvg', bar(byBrand.map(e => {
+    const p = e[1].map(x => x.price).filter(v => v != null);
+    return p.length ? Math.round(p.reduce((a, b) => a + b, 0) / p.length) : 0;
+  })));
+  const prices = VIEW.map(x => x.price).filter(v => v != null);
+  const max = Math.max(1000, ...prices), step = Math.ceil(max / 12 / 500) * 500;
+  const bins = Array.from({length: Math.ceil(max / step) + 1}, () => 0);
+  prices.forEach(v => bins[Math.floor(v / step)]++);
+  draw('cHist', {type: 'bar', data: {labels: bins.map((_, i) => `${i * step / 1000}k`),
+    datasets: [{data: bins, backgroundColor: COLORS[0]}]},
+    options: {plugins: {legend: {display: false}}, scales: {x: {title: {display: true, text: 'TL (bin)'}}}}});
+  const cats = [...group(x => x.category)].sort((a, b) => b[1].length - a[1].length).slice(0, 10);
+  draw('cCat', {type: 'bar', data: {labels: cats.map(c => c[0]), datasets: [{data: cats.map(c => c[1].length), backgroundColor: COLORS[2]}]},
+    options: {indexAxis: 'y', plugins: {legend: {display: false}}}});
+}
+
+function table() {
+  const start = page * PAGE, slice = VIEW.slice(start, start + PAGE);
+  $('rows').innerHTML = slice.map(x => `<tr>
+    <td class="name">${x.image_url ? `<img loading="lazy" src="${esc(x.image_url)}" alt="">` : ''}
+      <a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.name)}</a>${x.sku ? ` <span class="badge">${esc(x.sku)}</span>` : ''}</td>
+    <td>${esc(x.brand)}</td><td>${esc(x.category)}</td>
+    <td>${fmt(x.price)}${x.disc ? `<span class="old">${fmt(x.original_price)}</span>` : ''}</td>
+    <td>${x.disc ? '%' + x.disc : '—'}</td>
+    <td>${x.in_stock === true ? 'Var' : x.in_stock === false ? 'Yok' : '—'}</td></tr>`).join('');
+  const pages = Math.max(1, Math.ceil(VIEW.length / PAGE));
+  $('count').textContent = `${VIEW.length.toLocaleString('tr-TR')} ürün`;
+  $('pg').textContent = `${page + 1} / ${pages}`;
+  $('prev').disabled = page === 0; $('next').disabled = page >= pages - 1;
+}
+
+['q', 'fBrand', 'fCat', 'fStock', 'fDisc'].forEach(id => $(id).addEventListener('input', () => { page = 0; apply(); }));
+$('prev').onclick = () => { page--; table(); };
+$('next').onclick = () => { page++; table(); };
+document.querySelectorAll('th').forEach(th => th.onclick = () => {
+  const k = th.dataset.k; sortDir = sortK === k ? -sortDir : 1; sortK = k; apply();
+});
+$('csv').onclick = () => {
+  const cols = ['brand', 'name', 'sku', 'category', 'price', 'original_price', 'in_stock', 'url'];
+  const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const csv = '\ufeff' + [cols.join(',')].concat(VIEW.map(r => cols.map(c => q(r[c])).join(','))).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], {type: 'text/csv'})); a.download = 'urunler.csv'; a.click();
+};
+$('file').onchange = e => e.target.files[0]?.text().then(t => load(JSON.parse(t)));
+addEventListener('dragover', e => e.preventDefault());
+addEventListener('drop', e => { e.preventDefault(); e.dataTransfer.files[0]?.text().then(t => load(JSON.parse(t))); });
+// Supabase (anon/publishable anahtar herkese açık olacak şekilde tasarlanmıştır; yalnızca RLS ile okuma izni verilir)
+const SB_URL = 'https://eidvwzpiqzqcrbqimgvk.supabase.co';
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVpZHZ3enBpcXpxY3JicWltZ3ZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM0NDg2NzIsImV4cCI6MjEwOTAyNDY3Mn0.rDkXPX0ikfQ22PcKvS7rXpjbRiPcNXq3FiJIGFtXqMc';
+async function loadSupabase() {
+  const cols = 'brand,name,sku,category,color,price,original_price,currency,in_stock,url,image_url,last_seen_at';
+  const all = [];
+  for (let from = 0; ; from += 1000) {
+    const r = await fetch(`${SB_URL}/rest/v1/products?select=${cols}&order=id`, {
+      headers: {apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, Range: `${from}-${from + 999}`}});
+    if (!r.ok) throw new Error('Supabase ' + r.status);
+    const rows = await r.json();
+    all.push(...rows);
+    if (rows.length < 1000) break;
+  }
+  if (!all.length) throw new Error('empty');
+  load(all);
+}
+loadSupabase().catch(() => fetch('products.json').then(r => r.ok ? r.json() : Promise.reject()).then(load).catch(() => {}));
+</script>
+</body>
+</html>
