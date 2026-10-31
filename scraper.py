@@ -310,7 +310,7 @@ def run_brand(key, cfg, limit, conn, dry):
     print(f"\n=== {label} ({base}) ===")
     rp, sitemaps = robots_for(base)
 
-    rows = shopify_products(base, label, limit)
+    rows = shopify_products(base, label, limit) if rp.can_fetch(UA, urljoin(base, "/products.json")) else None
     if rows:
         print(f"  Shopify /products.json: {len(rows)} ürün")
     else:
